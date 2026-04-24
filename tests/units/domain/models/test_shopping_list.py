@@ -1,0 +1,39 @@
+import pytest
+from domain.models.shopping_list import ShoppingList
+
+
+def test_valid_shopping_list():
+    i = ShoppingList(name="Farine")
+    assert i.name == "Farine"
+
+
+def test_name_stripped():
+    i = ShoppingList(name="  Sel fin  ")
+    assert i.name == "Sel fin"
+
+
+def test_empty_name_raises():
+    with pytest.raises(Exception):
+        ShoppingList(name="")
+
+
+def test_blank_name_raises():
+    with pytest.raises(Exception):
+        ShoppingList(name="   ")
+
+
+
+def test_inherits_entity_fields():
+    from uuid6 import UUID
+    i = ShoppingList(name="Sel")
+    assert isinstance(i.uuid, UUID)
+    assert i.version == 1
+    assert not i.is_deleted
+
+
+def test_model_copy_update():
+    i = ShoppingList(name="Farine")
+    copy = i.model_copy(update={"name": "Farine complète"})
+    assert copy.name == "Farine complète"
+    assert copy.uuid == i.uuid
+
