@@ -1,10 +1,9 @@
 """Tests for adapters/input/fastapi/dependencies.py."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from fastapi import Request
-from fastapi.security import HTTPAuthorizationCredentials
 
 
 async def test_inject_tenant_uri_without_auth():
@@ -94,5 +93,4 @@ def test_require_auth_raises_without_keycloak_config():
         
         with pytest.raises(RuntimeError, match="config.keycloak requis"):
             _get_require_auth_fn()
-
 

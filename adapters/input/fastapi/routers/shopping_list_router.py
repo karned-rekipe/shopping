@@ -4,13 +4,22 @@ from uuid import UUID as StdUUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from uuid6 import UUID
 
-from adapters.input.fastapi.dependencies import inject_tenant_uri, require_auth
+from adapters.input.fastapi.dependencies import inject_tenant_uri
 from adapters.input.schemas.shopping_list_schema import (
+    ShoppingItemCreateSchema,
+    ShoppingItemPatchSchema,
+    ShoppingListAnalysisSchema,
     ShoppingListCreatedSchema,
     ShoppingListCreateSchema,
+    ShoppingListExportResultSchema,
+    ShoppingListExportSchema,
+    ShoppingListFromMealPlanSchema,
+    ShoppingListFromPeriodSchema,
     ShoppingListPatchSchema,
     ShoppingListSchema,
     ShoppingListUpdateSchema,
+    shopping_list_create_payload_to_domain,
+    shopping_list_update_payload_to_domain,
 )
 from application.services.shopping_list_service import ShoppingListService
 from arclith.adapters.input.fastapi.dependencies import get_duration_ms
@@ -22,94 +31,42 @@ from arclith.adapters.input.schemas.response_wrapper import (
     success_response,
 )
 from arclith.domain.ports.logger import Logger
-from domain.models.shopping_list import ShoppingList
+from domain.exceptions import (
+    MealPlanIntegrationError,
+    MealPlanNotConfirmed,
+    NoConfirmedMealPlanForPeriod,
+    ShoppingItemNotFound,
+    ShoppingListNotFound,
+    VersionConflict,
+)
 
 
 class ShoppingListRouter:
     def __init__(self, service: ShoppingListService, logger: Logger) -> None:
         self._service = service
         self._logger = logger
-        self.router = APIRouter(prefix="/v1/shopping_lists", tags=["shopping_lists"], dependencies=[Depends(inject_tenant_uri)])
+        self.router = APIRouter(
+            prefix="/v1/shopping-lists",
+            tags=["shopping-lists"],
+            dependencies=[Depends(inject_tenant_uri)],
+        )
         self._register_routes()
 
     def _register_routes(self) -> None:
-        self.router.add_api_route(
-            methods=["POST"],
-            path="/",
-            endpoint=self.create_shopping_list,
-            summary="Create shopping_list",
-            response_model = ApiResponse[ShoppingListCreatedSchema],
-            status_code=201,
-            responses = {
-                400: {"description": "Invalid payload"},
-                422: {"description": "Validation failed"},
-            },
-        )
-        self.router.add_api_route(
-            methods=["GET"],
-            path="/",
-            endpoint=self.list_shopping_lists,
-            summary="List shopping_lists",
-            response_model=PaginatedResponse[ShoppingListSchema],
-            status_code=200,
-        )
-        self.router.add_api_route(
-            methods=["GET"],
-            path="/{uuid}",
-            endpoint=self.get_shopping_list,
-            summary="Get shopping_list",
-            response_model=ApiResponse[ShoppingListSchema],
-            status_code=200,
-            responses = {
-                404: {"description": "ShoppingList not found"},
-            },
-        )
-        self.router.add_api_route(
-            methods=["PUT"],
-            path="/{uuid}",
-            endpoint=self.update_shopping_list,
-            summary="Replace shopping_list",
-            status_code=204,
-            responses = {
-                404: {"description": "ShoppingList not found"},
-                412: {"description": "Precondition Failed (version mismatch via If-Match)"},
-                422: {"description": "Validation failed"},
-            },
-        )
-        self.router.add_api_route(
-            methods=["PATCH"],
-            path="/{uuid}",
-            endpoint=self.patch_shopping_list,
-            summary="Partially update shopping_list",
-            status_code=204,
-            responses = {
-                404: {"description": "ShoppingList not found"},
-                412: {"description": "Precondition Failed (version mismatch via If-Match)"},
-                422: {"description": "Validation failed"},
-            },
-        )
-        self.router.add_api_route(
-            methods=["DELETE"],
-            path="/{uuid}",
-            endpoint=self.delete_shopping_list,
-            summary="Delete shopping_list",
-            status_code=204,
-            responses = {
-                404: {"description": "ShoppingList not found"},
-            },
-            dependencies=[Depends(require_auth)],
-        )
-        self.router.add_api_route(
-            methods=["POST"],
-            path="/{uuid}/duplicate",
-            endpoint=self.duplicate_shopping_list,
-            summary="Duplicate shopping_list",
-            response_model = ApiResponse[ShoppingListCreatedSchema],
-            status_code=201,
-            responses = {
-                404: {"description": "ShoppingList not found"},
-            },
-        )
+        self.router.add_api_route("/", self.create_shopping_list, methods=["POST"], response_model=ApiResponse[ShoppingListCreatedSchema], status_code=201)
+        self.router.add_api_route("/", self.list_shopping_lists, methods=["GET"], response_model=PaginatedResponse[ShoppingListSchema], status_code=200)
+        self.router.add_api_route("/from-meal-plan", self.create_from_meal_plan, methods=["POST"], response_model=ApiResponse[ShoppingListSchema], status_code=201)
+        self.router.add_api_route("/from-period", self.create_from_period, methods=["POST"], response_model=ApiResponse[ShoppingListSchema], status_code=201)
+        self.router.add_api_route("/{uuid}", self.get_shopping_list, methods=["GET"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
+        self.router.add_api_route("/{uuid}", self.update_shopping_list, methods=["PUT"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
+        self.router.add_api_route("/{uuid}", self.patch_shopping_list, methods=["PATCH"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
+        self.router.add_api_route("/{uuid}", self.delete_shopping_list, methods=["DELETE"], status_code=204)
+        self.router.add_api_route("/{uuid}/refresh", self.refresh_shopping_list, methods=["POST"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
+        self.router.add_api_route("/{uuid}/items", self.add_item, methods=["POST"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
+        self.router.add_api_route("/{uuid}/items/{item_uuid}", self.patch_item, methods=["PATCH"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
+        self.router.add_api_route("/{uuid}/items/{item_uuid}", self.delete_item, methods=["DELETE"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
+        self.router.add_api_route("/{uuid}/export-text", self.export_text, methods=["POST"], response_model=ApiResponse[ShoppingListExportResultSchema], status_code=200)
+        self.router.add_api_route("/{uuid}/analysis", self.analyze, methods=["GET"], response_model=ApiResponse[ShoppingListAnalysisSchema], status_code=200)
 
     @staticmethod
     def _to_uuid6(uuid: StdUUID) -> UUID:
@@ -118,296 +75,301 @@ class ShoppingListRouter:
     async def create_shopping_list(
         self,
         payload: ShoppingListCreateSchema,
-            response: Response,
-            request: Request,
+        response: Response,
+        request: Request,
         duration_ms: Annotated[float, Depends(get_duration_ms)],
-            prefer: Annotated[str | None, Header()] = None,
-    ) -> ApiResponse[ShoppingListCreatedSchema] | ApiResponse[ShoppingListSchema]:
-        """Create a new reusable shopping_list.
-
-        **SOTA REST Features:**
-        - Returns 201 Created with UUID only (minimal response)
-        - Location header points to the created resource
-        - Supports `Prefer: return=representation` to get full object instead
-        - Supports `Idempotency-Key` header to prevent duplicates (via middleware)
-        - Returns 422 for validation errors (business logic)
-
-        **Usage:**
-        ```bash
-        # Minimal response (default)
-        curl -X POST /v1/shopping_lists \\
-          -H "Content-Type: application/json" \\
-          -H "Idempotency-Key: $(uuidgen)" \\
-          -d '{"name": "Farine de blé"}'
-        
-        # Full representation
-        curl -X POST /v1/shopping_lists \\
-          -H "Prefer: return=representation" \\
-          -d '{"name": "Farine de blé"}'
-        ```
-        """
-        result = await self._service.create(ShoppingList(name=payload.name))
-
-        # RFC 7231: Location header on 201 Created
+    ) -> ApiResponse[ShoppingListCreatedSchema]:
+        result = await self._service.create(shopping_list_create_payload_to_domain(payload))
         location = f"{request.url.path.rstrip('/')}/{result.uuid}"
         response.headers["Location"] = location
-
-        # RFC 8288: Link header (HATEOAS)
-        response.headers["Link"] = f'<{location}>; rel="self", <{location}/duplicate>; rel="duplicate"'
-
-        # RFC 7240: Prefer header support
-        if prefer and "return=representation" in prefer.lower():
-            # Client wants full object
-            return success_response(
-                ShoppingListSchema.model_validate(result, from_attributes = True),
-                metadata = ResponseMetadata(duration_ms = int(duration_ms)),
-            )
-
-        # Default: minimal response (UUID only)
+        response.headers["ETag"] = self._etag(result.version)
         return success_response(
-            ShoppingListCreatedSchema(uuid = result.uuid),
+            ShoppingListCreatedSchema(uuid=result.uuid),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    async def create_from_meal_plan(
+        self,
+        payload: ShoppingListFromMealPlanSchema,
+        response: Response,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+        tenant_uri: Annotated[str | None, Header(alias="X-Tenant-URI")] = None,
+    ) -> ApiResponse[ShoppingListSchema]:
+        try:
+            result = await self._service.generate_from_meal_plan(
+                payload.meal_plan_uuid,
+                name=payload.name,
+                tenant_uri=tenant_uri,
+            )
+        except (MealPlanIntegrationError, MealPlanNotConfirmed) as exc:
+            raise self._to_http_exception(exc) from exc
+        response.headers["Location"] = f"/v1/shopping-lists/{result.uuid}"
+        response.headers["ETag"] = self._etag(result.version)
+        return success_response(
+            ShoppingListSchema.model_validate(result, from_attributes=True),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    async def create_from_period(
+        self,
+        payload: ShoppingListFromPeriodSchema,
+        response: Response,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+        tenant_uri: Annotated[str | None, Header(alias="X-Tenant-URI")] = None,
+    ) -> ApiResponse[ShoppingListSchema]:
+        try:
+            result = await self._service.generate_from_period(
+                payload.date_start,
+                payload.date_end,
+                name=payload.name,
+                tenant_uri=tenant_uri,
+            )
+        except (MealPlanIntegrationError, NoConfirmedMealPlanForPeriod) as exc:
+            raise self._to_http_exception(exc) from exc
+        response.headers["Location"] = f"/v1/shopping-lists/{result.uuid}"
+        response.headers["ETag"] = self._etag(result.version)
+        return success_response(
+            ShoppingListSchema.model_validate(result, from_attributes=True),
             metadata=ResponseMetadata(duration_ms=int(duration_ms)),
         )
 
     async def get_shopping_list(
         self,
         uuid: StdUUID,
-            response: Response,
-            request: Request,
+        response: Response,
         duration_ms: Annotated[float, Depends(get_duration_ms)],
     ) -> ApiResponse[ShoppingListSchema]:
-        """Get an shopping_list by its UUID.
-
-        **SOTA REST Features:**
-        - ETag header based on entity version (for caching/concurrency)
-        - Cache-Control: private, max-age=300 (via middleware)
-        - Link header for HATEOAS navigation
-        - Supports If-None-Match for conditional GET (304 Not Modified)
-
-        **Usage:**
-        ```bash
-        # First request
-        curl -i /v1/shopping_lists/01234...
-        # Returns: ETag: "v1"
-        
-        # Subsequent request (cache validation)
-        curl -H 'If-None-Match: "v1"' /v1/shopping_lists/01234...
-        # Returns: 304 Not Modified (if unchanged)
-        ```
-        """
         result = await self._service.read(self._to_uuid6(uuid))
         if result is None:
-            self._logger.warning("⚠️ ShoppingList not found via HTTP", uuid=str(uuid))
             raise HTTPException(status_code=404, detail="ShoppingList not found")
-
-        # RFC 7232: ETag for optimistic locking
-        response.headers["ETag"] = f'"{result.version}"'
-
-        # RFC 8288: Link header (HATEOAS)
-        base = f"{request.url.path.rstrip('/')}"
-        response.headers[
-            "Link"] = f'<{base}>; rel="self", <{base}/duplicate>; rel="duplicate", </v1/shopping_lists>; rel="collection"'
-        
+        response.headers["ETag"] = self._etag(result.version)
         return success_response(
             ShoppingListSchema.model_validate(result, from_attributes=True),
             metadata=ResponseMetadata(duration_ms=int(duration_ms)),
         )
 
-    async def update_shopping_list(
-            self,
-            uuid: StdUUID,
-            payload: ShoppingListUpdateSchema,
-            response: Response,
-            request: Request,
-            if_match: Annotated[str | None, Header()] = None,
-    ) -> None:
-        """Replace name of an existing shopping_list (PUT semantics).
-
-        **SOTA REST Features:**
-        - Requires If-Match header for optimistic locking
-        - Returns 412 Precondition Failed if version mismatch
-        - Returns 204 No Content on success
-        - Content-Location header points to updated resource
-        - New ETag in response headers
-
-        **Usage:**
-        ```bash
-        # Get current version
-        curl -i /v1/shopping_lists/01234...
-        # Returns: ETag: "v1"
-        
-        # Update with version check
-        curl -X PUT /v1/shopping_lists/01234... \\
-          -H 'If-Match: "v1"' \\
-          -d '{"name": "Nouvelle farine"}'
-        ```
-
-        The field is fully overwritten.
-        Note: changes do not propagate to recipes where this shopping_list is already linked (snapshot model).
-        """
-        existing = await self._service.read(self._to_uuid6(uuid))
-        if existing is None:
-            self._logger.warning("⚠️ ShoppingList not found via HTTP (PUT)", uuid = str(uuid))
-            raise HTTPException(status_code = 404, detail = "ShoppingList not found")
-
-        # RFC 7232: If-Match validation (optimistic locking)
-        if if_match:
-            expected_version = int(if_match.strip('"').lstrip('vV'))
-            if existing.version != expected_version:
-                self._logger.warning(
-                    "⚠️ Version mismatch (optimistic lock failure)",
-                    uuid = str(uuid),
-                    expected = expected_version,
-                    current = existing.version,
-                )
-                raise HTTPException(
-                    status_code = 412,
-                    detail = f"Version mismatch: expected v{expected_version}, current v{existing.version}",
-                )
-
-        updated = await self._service.update(ShoppingList(uuid = self._to_uuid6(uuid), name = payload.name))
-
-        # RFC 7231: Content-Location header
-        response.headers["Content-Location"] = f"/v1/shopping_lists/{uuid}"
-
-        # New ETag after update
-        response.headers["ETag"] = f'"{updated.version}"'
-
-    async def patch_shopping_list(
-            self,
-            uuid: StdUUID,
-            payload: ShoppingListPatchSchema,
-            response: Response,
-            request: Request,
-            if_match: Annotated[str | None, Header()] = None,
-    ) -> None:
-        """Partially update an shopping_list (PATCH semantics).
-
-        **SOTA REST Features:**
-        - Requires If-Match header for optimistic locking
-        - Returns 412 Precondition Failed if version mismatch
-        - Returns 204 No Content on success
-        - Content-Location header points to updated resource
-
-        Only the fields provided in the body are updated; omitted fields keep their current value.
-        Note: changes do not propagate to recipes where this shopping_list is already linked (snapshot model).
-        """
-        existing = await self._service.read(self._to_uuid6(uuid))
-        if existing is None:
-            self._logger.warning("⚠️ ShoppingList not found via HTTP (PATCH)", uuid = str(uuid))
-            raise HTTPException(status_code=404, detail="ShoppingList not found")
-
-        # RFC 7232: If-Match validation
-        if if_match:
-            expected_version = int(if_match.strip('"').lstrip('vV'))
-            if existing.version != expected_version:
-                self._logger.warning(
-                    "⚠️ Version mismatch (optimistic lock failure)",
-                    uuid = str(uuid),
-                    expected = expected_version,
-                    current = existing.version,
-                )
-                raise HTTPException(
-                    status_code = 412,
-                    detail = f"Version mismatch: expected v{expected_version}, current v{existing.version}",
-                )
-
-        updated = await self._service.update(
-            ShoppingList(
-                uuid = existing.uuid,
-                name = payload.name if payload.name is not None else existing.name,
-            )
-        )
-
-        # RFC 7231: Content-Location header
-        response.headers["Content-Location"] = f"/v1/shopping_lists/{uuid}"
-
-        # New ETag after update
-        response.headers["ETag"] = f'"{updated.version}"'
-
-    async def delete_shopping_list(self, uuid: StdUUID) -> None:
-        """Soft-delete an shopping_list.
-
-        **SOTA REST Features:**
-        - Returns 204 No Content on success
-        - Idempotent (deleting already-deleted resource returns 204)
-
-        The shopping_list is marked as deleted and excluded from list results.
-        It is retained until the purge retention period expires.
-        Use `DELETE /admin/purge` to permanently remove all expired entities.
-        """
-        await self._service.delete(self._to_uuid6(uuid))
-
     async def list_shopping_lists(
         self,
         response: Response,
         duration_ms: Annotated[float, Depends(get_duration_ms)],
-        page: int = Query(1, ge=1, description="Page number (1-indexed)"),
-        per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-        name: str | None = Query(None, min_length=1, description="Filter by name (partial, case-insensitive)"),
+        page: int = Query(1, ge=1),
+        per_page: int = Query(20, ge=1, le=100),
+        name: str | None = Query(None, min_length=1),
     ) -> PaginatedResponse[ShoppingListSchema]:
-        """List all active (non-deleted) shopping_lists.
-
-        **SOTA REST Features:**
-        - X-Total-Count header for total items (useful for pagination UI)
-        - Cache-Control: private, max-age=60 (via middleware)
-        - Always returns 200 OK, even if empty list
-
-        Pass `name` for a partial, case-insensitive name filter.
-        Each item: uuid, name, unit, created_at, updated_at, version.
-        Use the returned UUIDs with `POST /v1/recipes/{uuid}/shopping_lists/{shopping_list_uuid}` to link them to a recipe.
-        """
         offset = (page - 1) * per_page
         items, total = await self._service.find_page_filtered(name=name, offset=offset, limit=per_page)
-
-        # X-Total-Count header (common practice for pagination)
         response.headers["X-Total-Count"] = str(total)
-
         return paginated_response(
-            data=[ShoppingListSchema.model_validate(i, from_attributes=True) for i in items],
+            data=[ShoppingListSchema.model_validate(item, from_attributes=True) for item in items],
             total=total,
             page=page,
             per_page=per_page,
             metadata=ResponseMetadata(duration_ms=int(duration_ms)),
         )
 
-    async def duplicate_shopping_list(
+    async def update_shopping_list(
         self,
         uuid: StdUUID,
-            response: Response,
-            request: Request,
+        payload: ShoppingListUpdateSchema,
+        response: Response,
         duration_ms: Annotated[float, Depends(get_duration_ms)],
-            prefer: Annotated[str | None, Header()] = None,
-    ) -> ApiResponse[ShoppingListCreatedSchema] | ApiResponse[ShoppingListSchema]:
-        """Duplicate an shopping_list, assigning it a new UUID.
-
-        **SOTA REST Features:**
-        - Returns 201 Created with UUID only (minimal response)
-        - Location header points to the duplicated resource
-        - Supports `Prefer: return=representation` to get full object
-
-        Creates an independent copy with the same name and unit.
-        Returns the UUID of the new shopping_list.
-        """
-        result = await self._service.duplicate(self._to_uuid6(uuid))
-
-        # RFC 7231: Location header on 201 Created
-        location = f"/v1/shopping_lists/{result.uuid}"
-        response.headers["Location"] = location
-
-        # RFC 8288: Link header
-        response.headers["Link"] = f'<{location}>; rel="self", </v1/shopping_lists>; rel="collection"'
-
-        # RFC 7240: Prefer header support
-        if prefer and "return=representation" in prefer.lower():
-            return success_response(
-                ShoppingListSchema.model_validate(result, from_attributes = True),
-                metadata = ResponseMetadata(duration_ms = int(duration_ms)),
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> ApiResponse[ShoppingListSchema]:
+        expected_version = self._parse_if_match(if_match)
+        existing = await self._service.read(self._to_uuid6(uuid))
+        if existing is None:
+            raise HTTPException(status_code=404, detail="ShoppingList not found")
+        try:
+            result = await self._service.update_with_expected(
+                self._to_uuid6(uuid),
+                shopping_list_update_payload_to_domain(existing, payload),
+                expected_version,
             )
-
-        # Default: minimal response (UUID only)
+        except VersionConflict as exc:
+            raise self._to_http_exception(exc) from exc
+        response.headers["ETag"] = self._etag(result.version)
         return success_response(
-            ShoppingListCreatedSchema(uuid = result.uuid),
+            ShoppingListSchema.model_validate(result, from_attributes=True),
             metadata=ResponseMetadata(duration_ms=int(duration_ms)),
         )
 
+    async def patch_shopping_list(
+        self,
+        uuid: StdUUID,
+        payload: ShoppingListPatchSchema,
+        response: Response,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> ApiResponse[ShoppingListSchema]:
+        expected_version = self._parse_if_match(if_match)
+        existing = await self._service.read(self._to_uuid6(uuid))
+        if existing is None:
+            raise HTTPException(status_code=404, detail="ShoppingList not found")
+        update = payload.model_dump(exclude_unset=True)
+        try:
+            result = await self._service.update_with_expected(
+                self._to_uuid6(uuid),
+                existing.model_copy(update=update),
+                expected_version,
+            )
+        except VersionConflict as exc:
+            raise self._to_http_exception(exc) from exc
+        response.headers["ETag"] = self._etag(result.version)
+        return success_response(
+            ShoppingListSchema.model_validate(result, from_attributes=True),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    async def delete_shopping_list(
+        self,
+        uuid: StdUUID,
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> None:
+        expected_version = self._parse_if_match(if_match)
+        try:
+            await self._service.delete_with_expected(self._to_uuid6(uuid), expected_version)
+        except (ShoppingListNotFound, VersionConflict) as exc:
+            raise self._to_http_exception(exc) from exc
+
+    async def refresh_shopping_list(
+        self,
+        uuid: StdUUID,
+        response: Response,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+        tenant_uri: Annotated[str | None, Header(alias="X-Tenant-URI")] = None,
+    ) -> ApiResponse[ShoppingListSchema]:
+        expected_version = self._parse_if_match(if_match)
+        try:
+            result = await self._service.refresh_from_meal_plan(self._to_uuid6(uuid), expected_version, tenant_uri)
+        except (ShoppingListNotFound, VersionConflict, MealPlanIntegrationError, ValueError) as exc:
+            raise self._to_http_exception(exc) from exc
+        response.headers["ETag"] = self._etag(result.version)
+        return success_response(
+            ShoppingListSchema.model_validate(result, from_attributes=True),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    async def add_item(
+        self,
+        uuid: StdUUID,
+        payload: ShoppingItemCreateSchema,
+        response: Response,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> ApiResponse[ShoppingListSchema]:
+        expected_version = self._parse_if_match(if_match)
+        try:
+            result = await self._service.add_manual_item(self._to_uuid6(uuid), payload.to_domain(), expected_version)
+        except (ShoppingListNotFound, VersionConflict) as exc:
+            raise self._to_http_exception(exc) from exc
+        response.headers["ETag"] = self._etag(result.version)
+        return success_response(
+            ShoppingListSchema.model_validate(result, from_attributes=True),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    async def patch_item(
+        self,
+        uuid: StdUUID,
+        item_uuid: StdUUID,
+        payload: ShoppingItemPatchSchema,
+        response: Response,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> ApiResponse[ShoppingListSchema]:
+        expected_version = self._parse_if_match(if_match)
+        try:
+            result = await self._service.update_item(
+                self._to_uuid6(uuid),
+                item_uuid,
+                expected_version,
+                payload.to_changes(),
+            )
+        except (ShoppingListNotFound, ShoppingItemNotFound, VersionConflict) as exc:
+            raise self._to_http_exception(exc) from exc
+        response.headers["ETag"] = self._etag(result.version)
+        return success_response(
+            ShoppingListSchema.model_validate(result, from_attributes=True),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    async def delete_item(
+        self,
+        uuid: StdUUID,
+        item_uuid: StdUUID,
+        response: Response,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> ApiResponse[ShoppingListSchema]:
+        expected_version = self._parse_if_match(if_match)
+        try:
+            result = await self._service.remove_item(self._to_uuid6(uuid), item_uuid, expected_version)
+        except (ShoppingListNotFound, ShoppingItemNotFound, VersionConflict) as exc:
+            raise self._to_http_exception(exc) from exc
+        response.headers["ETag"] = self._etag(result.version)
+        return success_response(
+            ShoppingListSchema.model_validate(result, from_attributes=True),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    async def export_text(
+        self,
+        uuid: StdUUID,
+        payload: ShoppingListExportSchema,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+    ) -> ApiResponse[ShoppingListExportResultSchema]:
+        try:
+            result = await self._service.export_text(
+                self._to_uuid6(uuid),
+                item_uuids=payload.item_uuids,
+                rayon=payload.rayon,
+                supplier_uuid=payload.supplier_uuid,
+                include_checked=payload.include_checked,
+            )
+        except ShoppingListNotFound as exc:
+            raise self._to_http_exception(exc) from exc
+        return success_response(
+            ShoppingListExportResultSchema.model_validate(result),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    async def analyze(
+        self,
+        uuid: StdUUID,
+        duration_ms: Annotated[float, Depends(get_duration_ms)],
+    ) -> ApiResponse[ShoppingListAnalysisSchema]:
+        try:
+            result = await self._service.analyze(self._to_uuid6(uuid))
+        except ShoppingListNotFound as exc:
+            raise self._to_http_exception(exc) from exc
+        return success_response(
+            ShoppingListAnalysisSchema.model_validate(result),
+            metadata=ResponseMetadata(duration_ms=int(duration_ms)),
+        )
+
+    @staticmethod
+    def _etag(version: int) -> str:
+        return f'W/"{version}"'
+
+    @staticmethod
+    def _parse_if_match(value: str | None) -> int:
+        if value is None:
+            raise HTTPException(status_code=412, detail="If-Match header is required")
+        cleaned = value.strip()
+        if cleaned.startswith("W/"):
+            cleaned = cleaned[2:]
+        cleaned = cleaned.strip('"').lstrip("vV")
+        if not cleaned.isdigit():
+            raise HTTPException(status_code=412, detail="Invalid If-Match header")
+        return int(cleaned)
+
+    @staticmethod
+    def _to_http_exception(exc: Exception) -> HTTPException:
+        if isinstance(exc, (ShoppingListNotFound, ShoppingItemNotFound)):
+            return HTTPException(status_code=404, detail=str(exc))
+        if isinstance(exc, VersionConflict):
+            return HTTPException(status_code=412, detail=str(exc))
+        if isinstance(exc, (MealPlanIntegrationError, MealPlanNotConfirmed, NoConfirmedMealPlanForPeriod, ValueError)):
+            return HTTPException(status_code=422, detail=str(exc))
+        return HTTPException(status_code=500, detail="Unexpected shopping error")
