@@ -7,6 +7,7 @@ from typing import Callable
 import fastmcp
 
 from arclith.adapters.input.fastmcp.dependencies import make_inject_tenant_uri
+from arclith.domain.models.tenant import AdapterTenantCoords, TenantContext
 from arclith.infrastructure.config import load_config_dir
 
 _CONFIG_PATH = Path(__file__).parent.parent.parent.parent / "config"
@@ -40,6 +41,22 @@ def _get_header_tenant_resolver():
     )
 
 
+def _shopping_tenant_context(ctx: TenantContext) -> TenantContext:
+    mongo = ctx.get("mongodb")
+    if mongo is None:
+        return ctx
+
+    shopping_db_name = mongo.get("shopping_db_name")
+    if not shopping_db_name:
+        return ctx
+
+    adapters = dict(ctx.adapters)
+    params = dict(mongo.params)
+    params["db_name"] = shopping_db_name
+    adapters["mongodb"] = AdapterTenantCoords(params=params)
+    return TenantContext(adapters=adapters)
+
+
 def _extract_headers(ctx: fastmcp.Context) -> dict[str, str]:
     try:
         request = ctx.request_context.request
@@ -62,7 +79,7 @@ async def _inject_from_tenant_header(ctx: fastmcp.Context) -> bool:
 
     from arclith.adapters.context import set_tenant_context
 
-    set_tenant_context(await _get_header_tenant_resolver().resolve(tenant_id))
+    set_tenant_context(_shopping_tenant_context(await _get_header_tenant_resolver().resolve(tenant_id)))
     return True
 
 

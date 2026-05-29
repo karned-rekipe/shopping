@@ -8,6 +8,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from arclith.adapters.input.fastapi.dependencies import make_inject_tenant_uri
+from arclith.domain.models.tenant import AdapterTenantCoords, TenantContext
 from arclith.infrastructure.config import load_config_dir
 
 _CONFIG_PATH = Path(__file__).parent.parent.parent.parent / "config"
@@ -42,6 +43,22 @@ def _get_header_tenant_resolver():
     )
 
 
+def _shopping_tenant_context(ctx: TenantContext) -> TenantContext:
+    mongo = ctx.get("mongodb")
+    if mongo is None:
+        return ctx
+
+    shopping_db_name = mongo.get("shopping_db_name")
+    if not shopping_db_name:
+        return ctx
+
+    adapters = dict(ctx.adapters)
+    params = dict(mongo.params)
+    params["db_name"] = shopping_db_name
+    adapters["mongodb"] = AdapterTenantCoords(params=params)
+    return TenantContext(adapters=adapters)
+
+
 async def _inject_from_tenant_header(request: Request) -> bool:
     config = _get_config()
     if not config.adapters.multitenant:
@@ -53,7 +70,7 @@ async def _inject_from_tenant_header(request: Request) -> bool:
 
     from arclith.adapters.context import set_tenant_context
 
-    set_tenant_context(await _get_header_tenant_resolver().resolve(tenant_id))
+    set_tenant_context(_shopping_tenant_context(await _get_header_tenant_resolver().resolve(tenant_id)))
     return True
 
 
