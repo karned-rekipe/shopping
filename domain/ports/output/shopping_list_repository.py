@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from uuid import UUID
 
 from arclith.domain.ports.repository import Repository
 from domain.models.shopping_list import ShoppingList
@@ -14,3 +15,6 @@ class ShoppingListRepository(Repository[ShoppingList]):
         """Return a page of shopping_lists matching name filter and the total count."""
         pass
 
+    @abstractmethod
+    async def find_by_meal_plan(self, meal_plan_uuid: UUID) -> list[ShoppingList]:
+        pass

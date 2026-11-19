@@ -14,14 +14,22 @@ async def test_inject_tenant_uri_with_none_context():
     await inject_tenant_uri(None)
 
 
-async def test_inject_tenant_uri_with_context():
-    """Test inject_tenant_uri with a valid context."""
-    from adapters.input.fastmcp.dependencies import inject_tenant_uri
-    
+async def test_inject_tenant_uri_requires_tenant_or_auth_in_multitenant_mode():
+    config = MagicMock()
+    config.adapters.multitenant = True
+    from adapters.input.fastmcp.dependencies import _get_config, _get_inject_fn, inject_tenant_uri
+
     ctx = MagicMock(spec=fastmcp.Context)
-    
-    # Should not raise
-    await inject_tenant_uri(ctx)
+
+    with patch("adapters.input.fastmcp.dependencies._get_config", return_value=config):
+        _get_inject_fn.cache_clear()
+        try:
+            with pytest.raises(RuntimeError, match="jwt_decoder requis"):
+                await inject_tenant_uri(ctx)
+        finally:
+            _get_inject_fn.cache_clear()
+
+    _get_config.cache_clear()
 
 
 def test_inject_fn_is_cached():
@@ -53,7 +61,8 @@ def test_require_auth_mcp_fn_is_cached():
         mock_config.return_value = mock_cfg
         
         # Clear cache first
-        from adapters.input.fastmcp.dependencies import _get_require_auth_mcp_fn
+        from adapters.input.fastmcp.dependencies import _get_config, _get_require_auth_mcp_fn
+        _get_config.cache_clear()
         _get_require_auth_mcp_fn.cache_clear()
         
         fn1 = _get_require_auth_mcp_fn()
@@ -89,7 +98,8 @@ def test_require_auth_mcp_raises_without_keycloak_config():
         mock_config.return_value = mock_cfg
         
         # Clear cache
-        from adapters.input.fastmcp.dependencies import _get_require_auth_mcp_fn
+        from adapters.input.fastmcp.dependencies import _get_config, _get_require_auth_mcp_fn
+        _get_config.cache_clear()
         _get_require_auth_mcp_fn.cache_clear()
         
         with pytest.raises(RuntimeError, match="config.keycloak requis"):
@@ -118,11 +128,11 @@ async def test_require_auth_mcp_with_license_validator():
         mock_config.return_value = mock_cfg
         
         # Clear cache
-        from adapters.input.fastmcp.dependencies import _get_require_auth_mcp_fn
+        from adapters.input.fastmcp.dependencies import _get_config, _get_require_auth_mcp_fn
+        _get_config.cache_clear()
         _get_require_auth_mcp_fn.cache_clear()
         
         # Should not raise during function creation
         fn = _get_require_auth_mcp_fn()
         assert callable(fn)
-
 

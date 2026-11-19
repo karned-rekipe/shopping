@@ -31,7 +31,7 @@ class ShoppingListResources:
 
         @self._mcp.resource("resource://shopping-lists/sample")
         async def sample_shopping_lists_resource(ctx: fastmcp.Context) -> str:
-            """First 5 shopping_lists ordered by creation date — quick dataset preview."""
+            """First 5 shopping lists ordered by creation date."""
             await inject_tenant_uri(ctx)
             items = await service.find_all()
             sample = sorted(items, key=lambda i: i.created_at)[:_SAMPLE_LIMIT]
@@ -39,7 +39,7 @@ class ShoppingListResources:
 
         @self._mcp.resource("resource://shopping-lists/recent")
         async def recent_shopping_lists_resource(ctx: fastmcp.Context) -> str:
-            """Last 10 shopping_lists by creation date, newest first."""
+            """Last 10 shopping lists by creation date, newest first."""
             await inject_tenant_uri(ctx)
             items = await service.find_all()
             recent = sorted(items, key=lambda i: i.created_at, reverse=True)[:_RECENT_LIMIT]

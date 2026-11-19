@@ -13,22 +13,31 @@
 ## Installation
 
 ```bash
-cd /Users/killian/Karned/projets/Rekipe/shopping
+cd shopping
 uv sync --group dev
 ```
 
 ## Lancement
 
 ```bash
-MODE=api uv run python main.py
-MODE=mcp_http uv run python main.py
-MODE=all uv run python main.py
+MEAL_PLANNER_BASE_URL=http://127.0.0.1:8010 MODE=api uv run python main.py
+MEAL_PLANNER_BASE_URL=http://127.0.0.1:8010 MODE=mcp_http uv run python main.py
+MEAL_PLANNER_BASE_URL=http://127.0.0.1:8010 MODE=all uv run python main.py
 ```
 
 ## Configuration
 
-- Keycloak : [config/adapters/input/keycloak.yaml](/Users/killian/Karned/projets/Rekipe/shopping/config/adapters/input/keycloak.yaml)
-- MongoDB : [config/adapters/output/mongodb.yaml](/Users/killian/Karned/projets/Rekipe/shopping/config/adapters/output/mongodb.yaml)
-- Tenant : [config/adapters/input/tenant.yaml](/Users/killian/Karned/projets/Rekipe/shopping/config/adapters/input/tenant.yaml)
+- Keycloak : `config/adapters/input/keycloak.yaml`
+- MongoDB : `config/adapters/output/mongodb.yaml`
+- Tenant : `config/adapters/input/tenant.yaml`
 
-Par défaut, le repository reste en `memory` dans `config/adapters/adapters.yaml`. La configuration MongoDB multi-tenant est préparée pour la suite.
+Par défaut, le repository est `mongodb` dans `config/adapters/adapters.yaml`.
+La configuration locale attendue dans `secrets.yaml` est :
+
+```yaml
+adapters:
+  mongodb:
+    uri: mongodb://localhost:5971
+```
+
+La génération depuis une période consomme la projection du calendrier meal-planner, pas uniquement les plans `confirmed`.

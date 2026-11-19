@@ -1,10 +1,43 @@
-from .shopping_list_schema import ShoppingListCreateSchema, ShoppingListUpdateSchema, ShoppingListPatchSchema, ShoppingListSchema, \
-    ShoppingListCreatedSchema
+from adapters.input.schemas.shopping_list_schema import (
+    ShoppingItemCreateSchema,
+    ShoppingItemPatchSchema,
+    ShoppingItemSchema,
+    ShoppingListAnalysisSchema,
+    ShoppingListCreatedSchema,
+    ShoppingListCreateSchema,
+    ShoppingListExportResultSchema,
+    ShoppingListExportSchema,
+    ShoppingListFromPeriodSchema,
+    ShoppingListFromMealPlanSchema,
+    ShoppingListPatchSchema,
+    ShoppingListSchema,
+    ShoppingListUpdateSchema,
+)
+from adapters.input.schemas.supplier_schema import (
+    SupplierCreatedSchema,
+    SupplierCreateSchema,
+    SupplierPatchSchema,
+    SupplierSchema,
+    SupplierUpdateSchema,
+)
 
 __all__ = [
+    "ShoppingItemCreateSchema",
+    "ShoppingItemPatchSchema",
+    "ShoppingItemSchema",
+    "ShoppingListAnalysisSchema",
+    "ShoppingListCreatedSchema",
     "ShoppingListCreateSchema",
-    "ShoppingListUpdateSchema",
+    "ShoppingListExportResultSchema",
+    "ShoppingListExportSchema",
+    "ShoppingListFromPeriodSchema",
+    "ShoppingListFromMealPlanSchema",
     "ShoppingListPatchSchema",
     "ShoppingListSchema",
-    "ShoppingListCreatedSchema"
+    "ShoppingListUpdateSchema",
+    "SupplierCreatedSchema",
+    "SupplierCreateSchema",
+    "SupplierPatchSchema",
+    "SupplierSchema",
+    "SupplierUpdateSchema",
 ]
