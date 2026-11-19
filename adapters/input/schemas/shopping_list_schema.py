@@ -90,6 +90,13 @@ class ShoppingItemPatchSchema(BaseModel):
     def to_changes(self) -> dict[str, object]:
         return self.model_dump(exclude_unset=True)
 
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "ShoppingItemPatchSchema":
+        for field_name in ("name", "checked"):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null when provided")
+        return self
+
 
 class ShoppingListCreateSchema(BaseModel):
     name: str = Field("Liste de courses", min_length=1, max_length=160)
@@ -112,6 +119,13 @@ class ShoppingListPatchSchema(BaseModel):
         if isinstance(value, str) and not value.strip():
             raise ValueError("Name cannot be empty")
         return value
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "ShoppingListPatchSchema":
+        for field_name in ("name", "status"):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null when provided")
+        return self
 
 
 class ShoppingListUpdateSchema(BaseModel):

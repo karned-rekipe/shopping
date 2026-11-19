@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from math import ceil
 import re
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -402,16 +403,17 @@ def _export_items(doc: Document, payload: Document) -> list[Document]:
     supplier_uuid = _nullable_string(payload.get("supplier_uuid"))
     include_checked = bool(payload.get("include_checked", True))
 
-    items = [_shopping_item_payload(item) for item in _documents(doc.get("items"))]
-    if item_uuids:
-        items = [item for item in items if item["uuid"] in item_uuids]
-    if rayon:
-        items = [item for item in items if item["rayon"] == rayon]
-    if supplier_uuid:
-        items = [item for item in items if item["supplier_uuid"] == supplier_uuid]
-    if not include_checked:
-        items = [item for item in items if not item["checked"]]
-    return items
+    predicates: list[Callable[[Document], bool]] = [
+        lambda item: not item_uuids or item["uuid"] in item_uuids,
+        lambda item: rayon is None or item["rayon"] == rayon,
+        lambda item: supplier_uuid is None or item["supplier_uuid"] == supplier_uuid,
+        lambda item: include_checked or not item["checked"],
+    ]
+    return [
+        item
+        for item in (_shopping_item_payload(raw) for raw in _documents(doc.get("items")))
+        if all(predicate(item) for predicate in predicates)
+    ]
 
 
 def _export_line(item: Document) -> str:

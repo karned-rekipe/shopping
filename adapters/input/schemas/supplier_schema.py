@@ -1,6 +1,6 @@
 from uuid import UUID as StdUUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from arclith.adapters.input.schemas.base_schema import BaseSchema
 from domain.models.enums import SupplierType
@@ -35,6 +35,13 @@ class SupplierPatchSchema(BaseModel):
         if isinstance(value, str) and not value.strip():
             raise ValueError("Name cannot be empty")
         return value
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "SupplierPatchSchema":
+        for field_name in ("name", "supplier_type"):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null when provided")
+        return self
 
 
 class SupplierCreatedSchema(BaseModel):

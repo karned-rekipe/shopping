@@ -4,7 +4,7 @@ from uuid import UUID as StdUUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from uuid6 import UUID
 
-from adapters.input.fastapi.dependencies import inject_tenant_uri
+from adapters.input.fastapi.dependencies import _is_auth_disabled, inject_tenant_uri, require_auth
 from adapters.input.schemas.shopping_list_schema import (
     ShoppingItemCreateSchema,
     ShoppingItemPatchSchema,
@@ -60,7 +60,13 @@ class ShoppingListRouter:
         self.router.add_api_route("/{uuid}", self.get_shopping_list, methods=["GET"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
         self.router.add_api_route("/{uuid}", self.update_shopping_list, methods=["PUT"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
         self.router.add_api_route("/{uuid}", self.patch_shopping_list, methods=["PATCH"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
-        self.router.add_api_route("/{uuid}", self.delete_shopping_list, methods=["DELETE"], status_code=204)
+        self.router.add_api_route(
+            "/{uuid}",
+            self.delete_shopping_list,
+            methods=["DELETE"],
+            status_code=204,
+            dependencies=[Depends(require_auth)],
+        )
         self.router.add_api_route("/{uuid}/refresh", self.refresh_shopping_list, methods=["POST"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
         self.router.add_api_route("/{uuid}/items", self.add_item, methods=["POST"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
         self.router.add_api_route("/{uuid}/items/{item_uuid}", self.patch_item, methods=["PATCH"], response_model=ApiResponse[ShoppingListSchema], status_code=200)
@@ -99,7 +105,7 @@ class ShoppingListRouter:
             result = await self._service.generate_from_meal_plan(
                 payload.meal_plan_uuid,
                 name=payload.name,
-                tenant_uri=tenant_uri,
+                tenant_uri=tenant_uri if _is_auth_disabled() else None,
             )
         except (MealPlanIntegrationError, MealPlanNotConfirmed) as exc:
             raise self._to_http_exception(exc) from exc
@@ -122,7 +128,7 @@ class ShoppingListRouter:
                 payload.date_start,
                 payload.date_end,
                 name=payload.name,
-                tenant_uri=tenant_uri,
+                tenant_uri=tenant_uri if _is_auth_disabled() else None,
             )
         except (MealPlanIntegrationError, NoConfirmedMealPlanForPeriod) as exc:
             raise self._to_http_exception(exc) from exc
@@ -241,7 +247,11 @@ class ShoppingListRouter:
     ) -> ApiResponse[ShoppingListSchema]:
         expected_version = self._parse_if_match(if_match)
         try:
-            result = await self._service.refresh_from_meal_plan(self._to_uuid6(uuid), expected_version, tenant_uri)
+            result = await self._service.refresh_from_meal_plan(
+                self._to_uuid6(uuid),
+                expected_version,
+                tenant_uri if _is_auth_disabled() else None,
+            )
         except (ShoppingListNotFound, VersionConflict, MealPlanIntegrationError, ValueError) as exc:
             raise self._to_http_exception(exc) from exc
         response.headers["ETag"] = self._etag(result.version)

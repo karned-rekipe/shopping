@@ -6,7 +6,7 @@ import fastmcp
 from pydantic import Field
 from uuid6 import UUID
 
-from adapters.input.fastmcp.dependencies import inject_tenant_uri, require_auth_mcp
+from adapters.input.fastmcp.dependencies import inject_tenant_uri, local_tenant_uri, require_auth_mcp
 from adapters.input.schemas.shopping_list_schema import ShoppingListSchema
 from application.services.shopping_list_service import ShoppingListService
 from arclith.domain.ports.logger import Logger
@@ -59,7 +59,11 @@ class ShoppingListMCP:
             """Generate a shopping list from a confirmed meal plan."""
             await require_auth_mcp(ctx)
             await inject_tenant_uri(ctx)
-            result = await service.generate_from_meal_plan(StdUUID(meal_plan_uuid), name=name)
+            result = await service.generate_from_meal_plan(
+                StdUUID(meal_plan_uuid),
+                name=name,
+                tenant_uri=local_tenant_uri(),
+            )
             logger.info("ShoppingList generated via MCP", uuid=str(result.uuid), meal_plan_uuid=meal_plan_uuid)
             return ShoppingListSchema.model_validate(result).model_dump(mode="json")
 
@@ -75,7 +79,7 @@ class ShoppingListMCP:
             await inject_tenant_uri(ctx)
             start = date.fromisoformat(date_start)
             end = date.fromisoformat(date_end)
-            result = await service.generate_from_period(start, end, name=name)
+            result = await service.generate_from_period(start, end, name=name, tenant_uri=local_tenant_uri())
             logger.info("ShoppingList generated from period via MCP", uuid=str(result.uuid), date_start=date_start, date_end=date_end)
             return ShoppingListSchema.model_validate(result).model_dump(mode="json")
 

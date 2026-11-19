@@ -18,6 +18,23 @@ from domain.ports.output.meal_plan_client import MealPlanClient
 from domain.ports.output.shopping_list_repository import ShoppingListRepository
 
 
+def _matches_item_filters(
+    item: ShoppingItem,
+    *,
+    wanted: set[StdUUID] | None,
+    normalized_rayon: str | None,
+    supplier_uuid: StdUUID | None,
+    include_checked: bool,
+) -> bool:
+    if wanted is not None and item.uuid not in wanted:
+        return False
+    if normalized_rayon is not None and (item.rayon or "").casefold() != normalized_rayon:
+        return False
+    if supplier_uuid is not None and item.supplier_uuid != supplier_uuid:
+        return False
+    return include_checked or not item.checked
+
+
 class ShoppingListService(BaseService[ShoppingList]):
     def __init__(
         self,
@@ -127,10 +144,9 @@ class ShoppingListService(BaseService[ShoppingList]):
                 "source_meal_plan_uuids": regenerated.source_meal_plan_uuids,
                 "items": [*merged_generated, *manual_items],
                 "warnings": regenerated.warnings,
-                "status": self._status_after_generation(regenerated.warnings),
             },
         )
-        return await self.update(updated)
+        return await self.update(updated.model_copy(update={"status": self._status_after_items(updated)}))
 
     async def add_manual_item(self, uuid: UUID, item: ShoppingItem, expected_version: int) -> ShoppingList:
         existing = await self._get_existing(uuid)
@@ -428,18 +444,19 @@ class ShoppingListService(BaseService[ShoppingList]):
         supplier_uuid: StdUUID | None,
         include_checked: bool,
     ) -> list[ShoppingItem]:
-        selected = items
-        if item_uuids is not None:
-            wanted = set(item_uuids)
-            selected = [item for item in selected if item.uuid in wanted]
-        if rayon:
-            normalized = rayon.casefold()
-            selected = [item for item in selected if (item.rayon or "").casefold() == normalized]
-        if supplier_uuid is not None:
-            selected = [item for item in selected if item.supplier_uuid == supplier_uuid]
-        if not include_checked:
-            selected = [item for item in selected if not item.checked]
-        return selected
+        wanted = set(item_uuids) if item_uuids is not None else None
+        normalized_rayon = rayon.casefold() if rayon else None
+        return [
+            item
+            for item in items
+            if _matches_item_filters(
+                item,
+                wanted=wanted,
+                normalized_rayon=normalized_rayon,
+                supplier_uuid=supplier_uuid,
+                include_checked=include_checked,
+            )
+        ]
 
     @staticmethod
     def _format_quantity(item: ShoppingItem) -> str:
