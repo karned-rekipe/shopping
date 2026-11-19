@@ -15,12 +15,21 @@ async def test_inject_tenant_uri_with_none_context():
 
 
 async def test_inject_tenant_uri_requires_tenant_or_auth_in_multitenant_mode():
-    from adapters.input.fastmcp.dependencies import inject_tenant_uri
-    
+    config = MagicMock()
+    config.adapters.multitenant = True
+    from adapters.input.fastmcp.dependencies import _get_config, _get_inject_fn, inject_tenant_uri
+
     ctx = MagicMock(spec=fastmcp.Context)
-    
-    with pytest.raises(RuntimeError, match="jwt_decoder requis"):
-        await inject_tenant_uri(ctx)
+
+    with patch("adapters.input.fastmcp.dependencies._get_config", return_value=config):
+        _get_inject_fn.cache_clear()
+        try:
+            with pytest.raises(RuntimeError, match="jwt_decoder requis"):
+                await inject_tenant_uri(ctx)
+        finally:
+            _get_inject_fn.cache_clear()
+
+    _get_config.cache_clear()
 
 
 def test_inject_fn_is_cached():

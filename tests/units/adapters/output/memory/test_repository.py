@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from uuid6 import uuid7
@@ -51,6 +51,16 @@ async def test_find_all_excludes_deleted(repo):
     assert result[0].name == "Farine"
 
 
+async def test_find_page_returns_newest_first(repo):
+    older = ShoppingList(name="Ancienne", created_at=datetime.now(timezone.utc) - timedelta(days=1))
+    newer = ShoppingList(name="Récente", created_at=datetime.now(timezone.utc))
+    await repo.create(older)
+    await repo.create(newer)
+    result, total = await repo.find_page(0, 20)
+    assert total == 2
+    assert [item.name for item in result] == ["Récente", "Ancienne"]
+
+
 async def test_duplicate(repo):
     i = await repo.create(ShoppingList(name="Farine"))
     clone = await repo.duplicate(i.uuid)
@@ -63,4 +73,3 @@ async def test_duplicate_deleted_raises(repo):
     await repo.create(i)
     with pytest.raises(KeyError):
         await repo.duplicate(i.uuid)
-
