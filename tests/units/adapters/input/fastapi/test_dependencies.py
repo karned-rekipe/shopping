@@ -1,9 +1,18 @@
 """Tests for adapters/input/fastapi/dependencies.py."""
 
-import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+from arclith.infrastructure.config import load_config_dir
 from fastapi import Request
+
+
+def test_runtime_config_uses_multitenant_mongodb():
+    config = load_config_dir(Path(__file__).parents[5] / "config")
+
+    assert config.adapters.repository == "mongodb"
+    assert config.adapters.multitenant is True
 
 
 async def test_inject_tenant_uri_requires_tenant_or_auth_in_multitenant_mode():
@@ -102,4 +111,3 @@ def test_require_auth_raises_without_keycloak_config():
         
         with pytest.raises(RuntimeError, match="config.keycloak requis"):
             _get_require_auth_fn()
-
